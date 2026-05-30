@@ -11,6 +11,7 @@ export class CommandManager {
   private notificationInterceptor: NotificationInterceptor;
   private statusBarItem: vscode.StatusBarItem;
   private disposables: vscode.Disposable[] = [];
+  private lastStatsMessage: string = '';
 
   constructor(
     logger: Logger,
@@ -49,6 +50,11 @@ export class CommandManager {
     // Show stats command
     this.disposables.push(
       vscode.commands.registerCommand('telegram-notify.showStats', () => this.handleShowStats())
+    );
+
+    // Copy stats command
+    this.disposables.push(
+      vscode.commands.registerCommand('telegram-notify.copyStats', () => this.handleCopyStats())
     );
 
     this.logger.info('Commands registered successfully');
@@ -287,17 +293,125 @@ export class CommandManager {
     const notificationCount = this.notificationInterceptor.getNotificationCount();
     const activeButtons = this.telegramBot.getButtonHandler()?.getActiveButtonCount() || 0;
 
-    const statusMessage = `
-📊 Telegram Notify Statistics
+    // Get detailed stats
+    const uptime = this.getUptime();
+    const projectInfo = this.getProjectInfo();
+    const proxyInfo = this.getProxyInfo(config);
 
-🔔 Notifications sent: ${notificationCount}
-🔘 Active buttons: ${activeButtons}
-✅ Status: ${config.enabled ? 'Enabled' : 'Disabled'}
-🤖 Connected: ${this.telegramBot.isConnected() ? 'Yes' : 'No'}
-👤 Chat ID: ${config.chatId || 'Not configured'}
+    // Create detailed statistics with table format
+    const statsMessage = `
+📊 *Telegram Notify Statistics*
+
+┌─────────────────────────────────┐
+│       🔹 STATUS & INFO          │
+├─────────────────────────────────┤
+│ Status:       ${config.enabled ? '✅ Enabled' : '❌ Disabled              '}
+│ Connected:    ${this.telegramBot.isConnected() ? '✅ Yes    ' : '❌ No      '}
+│ Uptime:       ${uptime.padEnd(20)}│
+│ IDE:          ${projectInfo.ide.padEnd(20)}│
+│ Project:      ${projectInfo.project.padEnd(20)}│
+└─────────────────────────────────┘
+
+┌─────────────────────────────────┐
+│       🔹 NOTIFICATION STATS     │
+├─────────────────────────────────┤
+│ Total Sent:   ${String(notificationCount).padEnd(20)}│
+│ Active Btns:  ${String(activeButtons).padEnd(20)}│
+│ Button Timeout: ${String(config.buttonTimeout + 's').padEnd(18)}│
+│ Max Length:   ${String(config.maxMessageLength).padEnd(20)}│
+└─────────────────────────────────┘
+
+┌─────────────────────────────────┐
+│       🔹 CONFIGURATION          │
+├─────────────────────────────────┤
+│ Chat ID:      ${(config.chatId || 'Not set').padEnd(20)}│
+│ Bot Token:    ${config.botToken ? '✅ Set      ' : '❌ Not set  '}
+│ Severity:     ${config.filterSeverity.join(', ').padEnd(14)}│
+${proxyInfo}
+└─────────────────────────────────┘
     `.trim();
 
-    vscode.window.showInformationMessage(statusMessage);
+    // Show in VS Code notification
+    const selection = await vscode.window.showInformationMessage(
+      '📊 Statistics: ' + notificationCount + ' notifications sent',
+      { modal: false },
+      { title: '📋 Copy Stats' },
+      { title: '📄 View in Output' }
+    );
+
+    if (selection?.title === '📋 Copy Stats') {
+      await this.copyStatsToClipboard(statsMessage);
+    } else if (selection?.title === '📄 View in Output') {
+      this.logger.info('\n' + statsMessage.replace(/\*/g, ''));
+      vscode.commands.executeCommand('workbench.action.output.toggleOutput');
+    }
+
+    // Store stats for potential copy
+    this.lastStatsMessage = statsMessage;
+  }
+
+  private async handleCopyStats(): Promise<void> {
+    if (this.lastStatsMessage) {
+      await this.copyStatsToClipboard(this.lastStatsMessage);
+    } else {
+      await this.handleShowStats();
+    }
+  }
+
+  private async copyStatsToClipboard(statsMessage: string): Promise<void> {
+    try {
+      // Remove markdown for clipboard
+      const plainText = statsMessage.replace(/\*/g, '');
+      
+      await vscode.env.clipboard.writeText(plainText);
+      vscode.window.showInformationMessage('✅ Statistics copied to clipboard!');
+      this.logger.info('Statistics copied to clipboard');
+    } catch (error) {
+      this.logger.error('Failed to copy stats to clipboard', error);
+      vscode.window.showErrorMessage('Failed to copy statistics');
+    }
+  }
+
+  private getUptime(): string {
+    // This is a simple approximation - in real scenario you'd track start time
+    return 'Active';
+  }
+
+  private getProjectInfo(): { ide: string; project: string } {
+    const ide = require('vscode').env.appName || 'VS Code';
+    const workspaceFolders = require('vscode').workspace.workspaceFolders;
+    const project = workspaceFolders && workspaceFolders.length > 0 
+      ? workspaceFolders[0].name 
+      : 'No project';
+    
+    return {
+      ide: ide.substring(0, 20),
+      project: project.substring(0, 20)
+    };
+  }
+
+  private getProxyInfo(config: any): string {
+    if (!config.proxyEnabled) {
+      return '│ Proxy:        ❌ Disabled            │';
+    }
+
+    const proxyUrl = config.proxyUrl || `${config.proxyProtocol}://${config.proxyHost}:${config.proxyPort}`;
+    const maskedUrl = this.maskProxyUrlForStats(proxyUrl);
+    
+    return `│ Proxy:        ✅ ${maskedUrl.padEnd(15)}│`;
+  }
+
+  private maskProxyUrlForStats(url: string): string {
+    try {
+      const urlObj = new URL(url);
+      let masked = urlObj.protocol + '//';
+      if (urlObj.username) masked += '***:***@';
+      masked += urlObj.hostname;
+      if (urlObj.port) masked += ':' + urlObj.port;
+      return masked.substring(0, 15);
+    } catch {
+      return url.substring(0, 15);
+    }
   }
 
   async initializeBot(): Promise<boolean> {

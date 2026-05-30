@@ -46,7 +46,162 @@ export class QoderIntegration {
     // Register manual trigger commands
     this.registerCommands();
 
+    // Watch for Qoder sidebar updates
+    this.watchQoderSidebar();
+
     this.logger.info('Qoder integration initialized');
+  }
+
+  /**
+   * Watch for Qoder sidebar notifications and prompts
+   */
+  private watchQoderSidebar(): void {
+    if (!vscode.workspace.workspaceFolders) {
+      return;
+    }
+
+    const workspaceRoot = vscode.workspace.workspaceFolders[0].uri.fsPath;
+
+    // Watch for Qoder sidebar data files
+    const sidebarPatterns = [
+      '**/.qoder/**/*.json',
+      '**/.qoder/**/*.log',
+      '**/.qoder/**/notifications*',
+      '**/.qoder/**/prompts*',
+      '**/.qoder/**/chat*',
+      '**/.qoder/**/messages*',
+    ];
+
+    for (const pattern of sidebarPatterns) {
+      const watcher = vscode.workspace.createFileSystemWatcher(
+        new vscode.RelativePattern(workspaceRoot, pattern)
+      );
+
+      // Watch for new notifications/prompts
+      watcher.onDidCreate((uri) => {
+        this.logger.info(`Qoder sidebar file created: ${uri.fsPath}`);
+        this.processQoderFile(uri);
+      });
+
+      // Watch for updates
+      watcher.onDidChange((uri) => {
+        this.logger.debug(`Qoder sidebar file changed: ${uri.fsPath}`);
+        this.processQoderFile(uri);
+      });
+
+      this.disposables.push(watcher);
+    }
+
+    // Also watch global storage for Qoder data
+    this.watchGlobalQoderStorage();
+  }
+
+  /**
+   * Process Qoder file and forward notifications
+   */
+  private async processQoderFile(uri: vscode.Uri): Promise<void> {
+    try {
+      const fileName = uri.fsPath.toLowerCase();
+      
+      // Skip if not a notification/prompt file
+      if (!fileName.includes('notification') && 
+          !fileName.includes('prompt') && 
+          !fileName.includes('chat') &&
+          !fileName.includes('message')) {
+        return;
+      }
+
+      // Read file content
+      const content = await vscode.workspace.fs.readFile(uri);
+      const text = Buffer.from(content).toString('utf-8');
+
+      // Try to parse as JSON
+      try {
+        const data = JSON.parse(text);
+        
+        // Handle array of notifications
+        if (Array.isArray(data)) {
+          for (const item of data.slice(-5)) { // Last 5 items
+            await this.forwardQoderItem(item, uri.fsPath);
+          }
+        } 
+        // Handle single notification
+        else if (data.message || data.content || data.text) {
+          await this.forwardQoderItem(data, uri.fsPath);
+        }
+      } catch {
+        // Not JSON - forward as text if it looks like a notification
+        if (text.length > 10 && text.length < 5000) {
+          await this.forwardNotification(
+            `📝 Qoder Sidebar Update\n\n\`\`\`\n${text.substring(0, 1000)}\n\`\`\``,
+            MessageType.Information,
+            'Qoder Sidebar'
+          );
+        }
+      }
+    } catch (error) {
+      this.logger.error(`Failed to process Qoder file: ${uri.fsPath}`, error);
+    }
+  }
+
+  /**
+   * Forward individual Qoder item to Telegram
+   */
+  private async forwardQoderItem(item: any, source: string): Promise<void> {
+    const message = item.message || item.content || item.text || JSON.stringify(item);
+    const type = item.type || 'notification';
+    
+    let emoji = '📝';
+    let messageType = MessageType.Information;
+
+    if (type.includes('error') || message.toLowerCase().includes('error')) {
+      emoji = '🚨';
+      messageType = MessageType.Error;
+    } else if (type.includes('warning') || type.includes('warn')) {
+      emoji = '⚠️';
+      messageType = MessageType.Warning;
+    } else if (type.includes('prompt')) {
+      emoji = '💬';
+    } else if (type.includes('response')) {
+      emoji = '🤖';
+    }
+
+    await this.forwardNotification(
+      `${emoji} Qoder Sidebar ${type}\n\n${message.substring(0, 2000)}`,
+      messageType,
+      'Qoder Sidebar',
+      [
+        {
+          title: '📂 Open File',
+          command: { id: 'vscode.open', arguments: [vscode.Uri.file(source)] }
+        },
+        {
+          title: 'ℹ️ Details',
+          command: { id: 'workbench.action.output.toggleOutput' }
+        }
+      ]
+    );
+  }
+
+  /**
+   * Watch global storage for Qoder data
+   */
+  private watchGlobalQoderStorage(): void {
+    // Try to find Qoder extension storage
+    const extensions = vscode.extensions.all;
+    
+    for (const ext of extensions) {
+      if (ext.id.toLowerCase().includes('qoder')) {
+        this.logger.info(`Found Qoder extension: ${ext.id}`);
+        
+        // Listen for extension updates
+        const extWatcher = vscode.extensions.onDidChange(() => {
+          this.logger.debug('Extensions changed - checking for Qoder updates');
+        });
+        
+        this.disposables.push(extWatcher);
+      }
+    }
   }
 
   /**

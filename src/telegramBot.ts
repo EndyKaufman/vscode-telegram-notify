@@ -4,6 +4,7 @@ import { MessageFormatter, FormattedMessage } from './messageFormatter';
 import { ButtonHandler } from './buttonHandler';
 import { MessageType, ExtendedMessageItem } from './types';
 import { ProxyManager, ProxyConfig } from './proxyManager';
+import { BotMutex } from './botMutex';
 import * as vscode from 'vscode';
 
 export class TelegramBotService {
@@ -14,11 +15,14 @@ export class TelegramBotService {
   private chatId: string | null = null;
   private isInitialized: boolean = false;
   private proxyManager: ProxyManager;
+  private mutex: BotMutex;
+  private hasPollingLock: boolean = false;
 
   constructor(logger: Logger, formatter: MessageFormatter) {
     this.logger = logger;
     this.formatter = formatter;
     this.proxyManager = new ProxyManager(logger);
+    this.mutex = new BotMutex(logger);
   }
 
   async initialize(botToken: string, chatId: string, buttonTimeout: number = 300, proxyConfig?: ProxyConfig): Promise<boolean> {
@@ -28,6 +32,14 @@ export class TelegramBotService {
       }
 
       this.logger.info('Initializing Telegram Bot...');
+
+      // Try to acquire mutex for polling
+      this.hasPollingLock = await this.mutex.tryAcquire();
+      if (this.hasPollingLock) {
+        this.logger.info('This instance will handle Telegram bot polling');
+      } else {
+        this.logger.info('Another instance is handling polling, this instance will only send messages');
+      }
 
       // Configure proxy if provided
       let requestOptions: any = {};
@@ -48,16 +60,24 @@ export class TelegramBotService {
         }
       }
 
-      // Create new bot instance with polling
-      this.bot = new TelegramBot(botToken, {
-        polling: {
+      // Create new bot instance
+      // Only enable polling if we acquired the mutex lock
+      const botOptions: any = {
+        request: Object.keys(requestOptions).length > 0 ? requestOptions : undefined
+      };
+
+      if (this.hasPollingLock) {
+        botOptions.polling = {
           interval: 1000,
           params: {
             timeout: 10
           }
-        },
-        request: Object.keys(requestOptions).length > 0 ? requestOptions : undefined
-      });
+        };
+      } else {
+        botOptions.polling = false;
+      }
+
+      this.bot = new TelegramBot(botToken, botOptions);
 
       this.chatId = chatId;
 
@@ -209,8 +229,17 @@ export class TelegramBotService {
       }
 
       if (this.bot) {
-        this.bot.stopPolling();
+        // Only stop polling if we were the ones doing it
+        if (this.hasPollingLock) {
+          this.bot.stopPolling();
+        }
         this.bot = null;
+      }
+
+      // Release the mutex lock
+      if (this.hasPollingLock) {
+        this.mutex.release();
+        this.hasPollingLock = false;
       }
 
       this.isInitialized = false;
