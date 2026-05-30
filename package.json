@@ -1,0 +1,276 @@
+{
+  "name": "vscode-telegram-notify",
+  "displayName": "Telegram Notify",
+  "description": "Forward VS Code notifications to Telegram with interactive button support",
+  "version": "0.1.3",
+  "publisher": "your-publisher-name",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/your-username/vscode-telegram-notify"
+  },
+  "engines": {
+    "vscode": "^1.106.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "telegram-notify.setup",
+        "title": "Telegram Notify: Setup Bot",
+        "category": "Telegram Notify"
+      },
+      {
+        "command": "telegram-notify.test",
+        "title": "Telegram Notify: Send Test Notification",
+        "category": "Telegram Notify"
+      },
+      {
+        "command": "telegram-notify.toggle",
+        "title": "Telegram Notify: Toggle Notifications",
+        "category": "Telegram Notify"
+      },
+      {
+        "command": "telegram-notify.showStats",
+        "title": "Telegram Notify: Show Statistics",
+        "category": "Telegram Notify"
+      },
+      {
+        "command": "telegram-notify.test.simpleInfo",
+        "title": "Telegram Notify: [TEST] Simple Info",
+        "category": "Telegram Notify"
+      },
+      {
+        "command": "telegram-notify.test.simpleWarning",
+        "title": "Telegram Notify: [TEST] Simple Warning",
+        "category": "Telegram Notify"
+      },
+      {
+        "command": "telegram-notify.test.simpleError",
+        "title": "Telegram Notify: [TEST] Simple Error",
+        "category": "Telegram Notify"
+      },
+      {
+        "command": "telegram-notify.test.errorWithButtons",
+        "title": "Telegram Notify: [TEST] Error with Buttons",
+        "category": "Telegram Notify"
+      },
+      {
+        "command": "telegram-notify.test.warningWithMultipleButtons",
+        "title": "Telegram Notify: [TEST] Warning with Multiple Buttons",
+        "category": "Telegram Notify"
+      },
+      {
+        "command": "telegram-notify.test.longMessage",
+        "title": "Telegram Notify: [TEST] Long Message",
+        "category": "Telegram Notify"
+      },
+      {
+        "command": "telegram-notify.test.specialCharacters",
+        "title": "Telegram Notify: [TEST] Special Characters",
+        "category": "Telegram Notify"
+      },
+      {
+        "command": "telegram-notify.test.multilineMessage",
+        "title": "Telegram Notify: [TEST] Multiline Message",
+        "category": "Telegram Notify"
+      },
+      {
+        "command": "telegram-notify.test.batchNotifications",
+        "title": "Telegram Notify: [TEST] Batch Notifications",
+        "category": "Telegram Notify"
+      },
+      {
+        "command": "telegram-notify.test.sequentialNotifications",
+        "title": "Telegram Notify: [TEST] Sequential Notifications",
+        "category": "Telegram Notify"
+      },
+      {
+        "command": "telegram-notify.test.buttonTimeout",
+        "title": "Telegram Notify: [TEST] Button Timeout",
+        "category": "Telegram Notify"
+      },
+      {
+        "command": "telegram-notify.test.allButtonTypes",
+        "title": "Telegram Notify: [TEST] All Button Types",
+        "category": "Telegram Notify"
+      },
+      {
+        "command": "telegram-notify.test.markdownFormatting",
+        "title": "Telegram Notify: [TEST] Markdown Formatting",
+        "category": "Telegram Notify"
+      },
+      {
+        "command": "telegram-notify.qoder.forwardPrompt",
+        "title": "Telegram Notify: [Qoder] Forward Prompt",
+        "category": "Telegram Notify"
+      },
+      {
+        "command": "telegram-notify.qoder.forwardAgentTask",
+        "title": "Telegram Notify: [Qoder] Forward Agent Task",
+        "category": "Telegram Notify"
+      },
+      {
+        "command": "telegram-notify.qoder.forwardCompletion",
+        "title": "Telegram Notify: [Qoder] Forward Completion",
+        "category": "Telegram Notify"
+      },
+      {
+        "command": "telegram-notify.qoder.customMessage",
+        "title": "Telegram Notify: [Qoder] Custom Message",
+        "category": "Telegram Notify"
+      },
+      {
+        "command": "telegram-notify.test.qoderPrompt",
+        "title": "Telegram Notify: [TEST] Qoder Prompt",
+        "category": "Telegram Notify"
+      },
+      {
+        "command": "telegram-notify.test.qoderAgentTask",
+        "title": "Telegram Notify: [TEST] Qoder Agent Task",
+        "category": "Telegram Notify"
+      },
+      {
+        "command": "telegram-notify.test.qoderCompletion",
+        "title": "Telegram Notify: [TEST] Qoder Completion",
+        "category": "Telegram Notify"
+      },
+      {
+        "command": "telegram-notify.test.qoderError",
+        "title": "Telegram Notify: [TEST] Qoder Error",
+        "category": "Telegram Notify"
+      },
+      {
+        "command": "telegram-notify.test.qoderProgress",
+        "title": "Telegram Notify: [TEST] Qoder Progress",
+        "category": "Telegram Notify"
+      },
+      {
+        "command": "telegram-notify.test.qoderSequential",
+        "title": "Telegram Notify: [TEST] Qoder Sequential",
+        "category": "Telegram Notify"
+      }
+    ],
+    "configuration": {
+      "title": "Telegram Notify",
+      "properties": {
+        "telegramNotify.botToken": {
+          "type": "string",
+          "default": "",
+          "description": "Telegram Bot Token (stored securely in VS Code secrets when possible)"
+        },
+        "telegramNotify.chatId": {
+          "type": "string",
+          "default": "",
+          "description": "Telegram Chat ID (user ID or group ID)"
+        },
+        "telegramNotify.enabled": {
+          "type": "boolean",
+          "default": false,
+          "description": "Enable forwarding notifications to Telegram"
+        },
+        "telegramNotify.filterSeverity": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "error",
+              "warning",
+              "info"
+            ]
+          },
+          "default": [
+            "error",
+            "warning",
+            "info"
+          ],
+          "description": "Which notification severities to forward"
+        },
+        "telegramNotify.excludeSources": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "description": "Extension names or sources to exclude from forwarding"
+        },
+        "telegramNotify.buttonTimeout": {
+          "type": "number",
+          "default": 300,
+          "description": "How long notification buttons remain active in Telegram (in seconds)"
+        },
+        "telegramNotify.maxMessageLength": {
+          "type": "number",
+          "default": 4000,
+          "description": "Maximum message length before truncation (Telegram limit: 4096)"
+        },
+        "telegramNotify.proxyEnabled": {
+          "type": "boolean",
+          "default": false,
+          "description": "Enable proxy server for Telegram connection"
+        },
+        "telegramNotify.proxyUrl": {
+          "type": "string",
+          "default": "",
+          "description": "Proxy URL in format: protocol://username:password@host:port (e.g., socks5://user:pass@proxy.com:1080)"
+        },
+        "telegramNotify.proxyHost": {
+          "type": "string",
+          "default": "",
+          "description": "Proxy server hostname or IP address (alternative to proxyUrl)"
+        },
+        "telegramNotify.proxyPort": {
+          "type": "number",
+          "default": 1080,
+          "description": "Proxy server port number (alternative to proxyUrl)"
+        },
+        "telegramNotify.proxyProtocol": {
+          "type": "string",
+          "enum": ["http", "https", "socks4", "socks5"],
+          "default": "socks5",
+          "description": "Proxy protocol type (alternative to proxyUrl)"
+        },
+        "telegramNotify.proxyUsername": {
+          "type": "string",
+          "default": "",
+          "description": "Proxy username (alternative to proxyUrl)"
+        },
+        "telegramNotify.proxyPassword": {
+          "type": "string",
+          "default": "",
+          "description": "Proxy password (alternative to proxyUrl)"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run build",
+    "build": "esbuild ./src/extension.ts --bundle --outfile=dist/extension.js --external:vscode --format=cjs --platform=node --minify",
+    "watch": "esbuild ./src/extension.ts --bundle --outfile=dist/extension.js --external:vscode --format=cjs --platform=node --watch",
+    "compile": "tsc --noEmit",
+    "lint": "eslint src --ext ts"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/node-telegram-bot-api": "^0.64.0",
+    "@types/uuid": "^9.0.0",
+    "@types/vscode": "^1.106.0",
+    "@typescript-eslint/eslint-plugin": "^7.0.0",
+    "@typescript-eslint/parser": "^7.0.0",
+    "@vscode/vsce": "^2.24.0",
+    "esbuild": "^0.20.0",
+    "eslint": "^8.56.0",
+    "typescript": "^5.3.0"
+  },
+  "dependencies": {
+    "node-telegram-bot-api": "^0.64.0",
+    "uuid": "^9.0.0",
+    "https-proxy-agent": "^7.0.0",
+    "socks-proxy-agent": "^8.0.0"
+  }
+}
