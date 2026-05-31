@@ -17,6 +17,8 @@ export class TelegramBotService {
   private proxyManager: ProxyManager;
   private mutex: BotMutex;
   private hasPollingLock: boolean = false;
+  private pendingPrompt: ((value: string | undefined) => void) | undefined;
+  private promptTargetUserId: number | undefined;
 
   constructor(logger: Logger, formatter: MessageFormatter) {
     this.logger = logger;
@@ -113,7 +115,8 @@ export class TelegramBotService {
     message: string,
     severity: MessageType = MessageType.Information,
     source?: string,
-    buttons?: ExtendedMessageItem[]
+    buttons?: ExtendedMessageItem[],
+    targetUserId?: number
   ): Promise<void> {
     if (!this.isInitialized || !this.bot || !this.chatId) {
       this.logger.warn('Telegram Bot not initialized, cannot send message');
@@ -126,7 +129,7 @@ export class TelegramBotService {
       // If there are buttons, create inline keyboard
       if (buttons && buttons.length > 0 && this.buttonHandler) {
         const notificationId = `notif_${Date.now()}`;
-        const inlineKeyboard = this.buttonHandler.createInlineKeyboard(buttons, notificationId);
+        const inlineKeyboard = this.buttonHandler.createInlineKeyboard(buttons, notificationId, targetUserId);
 
         await this.bot.sendMessage(this.chatId, formattedMessage.text, {
           parse_mode: formattedMessage.parseMode,
@@ -143,6 +146,113 @@ export class TelegramBotService {
       this.logger.error('Failed to send message to Telegram', error);
       throw error;
     }
+  }
+
+  async sendMessageAndWaitForButton(
+    message: string,
+    severity: MessageType = MessageType.Information,
+    source?: string,
+    buttons: ExtendedMessageItem[] = [],
+    targetUserId?: number
+  ): Promise<string | undefined> {
+    if (!this.isInitialized || !this.bot || !this.chatId || !this.buttonHandler) {
+      this.logger.warn('Telegram Bot not initialized, cannot wait for button');
+      return undefined;
+    }
+
+    const formattedMessage = this.formatter.formatNotification(message, severity, source);
+    const notificationId = `notif_${Date.now()}`;
+
+    return new Promise<string | undefined>((resolve) => {
+      let settled = false;
+      const timeout = setTimeout(() => {
+        if (!settled) {
+          settled = true;
+          resolve(undefined);
+        }
+      }, 300000);
+
+      const inlineKeyboard = this.buttonHandler!.createInlineKeyboardWithSelection(
+        buttons,
+        notificationId,
+        (buttonTitle) => {
+          if (!settled) {
+            settled = true;
+            clearTimeout(timeout);
+            resolve(buttonTitle || undefined);
+          }
+        },
+        targetUserId
+      );
+
+      this.bot!.sendMessage(this.chatId!, formattedMessage.text, {
+        parse_mode: formattedMessage.parseMode,
+        reply_markup: inlineKeyboard
+      }).then((sentMessage) => {
+        // Store the target user ID from the sent message
+        if (sentMessage && sentMessage.chat) {
+          this.logger.debug(`Message sent to chat: ${sentMessage.chat.id}`);
+        }
+      }).catch((error) => {
+        this.logger.error('Failed to send selectable message to Telegram', error);
+        if (!settled) {
+          settled = true;
+          clearTimeout(timeout);
+          resolve(undefined);
+        }
+      });
+    });
+  }
+
+  async sendPromptAndWaitForReply(message: string, source?: string, targetUserId?: number): Promise<string | undefined> {
+    if (!this.isInitialized || !this.bot || !this.chatId || !this.hasPollingLock) {
+      this.logger.warn('Telegram Bot not initialized for prompt replies');
+      return undefined;
+    }
+
+    const formattedMessage = this.formatter.formatNotification(
+      `${message}\n\nReply to this chat to answer, or send /cancel to dismiss.`,
+      MessageType.Information,
+      source
+    );
+
+    return new Promise<string | undefined>((resolve) => {
+      if (this.pendingPrompt) {
+        this.pendingPrompt(undefined);
+      }
+
+      let settled = false;
+      const timeout = setTimeout(() => {
+        if (!settled) {
+          settled = true;
+          this.pendingPrompt = undefined;
+          this.promptTargetUserId = undefined;
+          resolve(undefined);
+        }
+      }, 300000);
+
+      this.pendingPrompt = (value) => {
+        if (!settled) {
+          settled = true;
+          clearTimeout(timeout);
+          this.pendingPrompt = undefined;
+          this.promptTargetUserId = undefined;
+          resolve(value);
+        }
+      };
+
+      // Store the target user ID for this prompt
+      this.promptTargetUserId = targetUserId;
+
+      this.bot!.sendMessage(this.chatId!, formattedMessage.text, {
+        parse_mode: formattedMessage.parseMode
+      }).catch((error) => {
+        this.logger.error('Failed to send prompt to Telegram', error);
+        if (this.pendingPrompt) {
+          this.pendingPrompt(undefined);
+        }
+      });
+    });
   }
 
   async sendTestMessage(): Promise<boolean> {
@@ -165,6 +275,23 @@ export class TelegramBotService {
 
   private handleMessage(msg: TelegramBot.Message): void {
     this.logger.debug(`Received message from ${msg.from?.username || msg.from?.first_name}: ${msg.text}`);
+
+    if (this.chatId && msg.chat.id.toString() !== this.chatId) {
+      return;
+    }
+
+    // Verify that the message is from the target user (if set)
+    if (this.promptTargetUserId && msg.from && msg.from.id !== this.promptTargetUserId) {
+      this.logger.warn(`Message from unauthorized user: ${msg.from.id}, expected: ${this.promptTargetUserId}`);
+      this.bot?.sendMessage(msg.chat.id, '⚠️ Only the intended recipient can reply to this prompt.', {
+        reply_to_message_id: msg.message_id
+      }).catch(() => {});
+      return;
+    }
+
+    if (this.pendingPrompt && typeof msg.text === 'string') {
+      this.pendingPrompt(msg.text === '/cancel' ? undefined : msg.text);
+    }
   }
 
   private handleCallbackQuery(callbackQuery: TelegramBot.CallbackQuery): void {

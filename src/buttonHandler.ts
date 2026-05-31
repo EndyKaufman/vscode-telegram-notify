@@ -12,6 +12,8 @@ export interface ButtonMapping {
   notificationId: string;
   buttonTitle: string;
   createdAt: number;
+  onSelect?: (buttonTitle: string) => void;
+  targetUserId?: number; // Telegram user ID who should respond
 }
 
 export class ButtonHandler {
@@ -41,7 +43,16 @@ export class ButtonHandler {
     this.cleanupInterval = setInterval(() => this.cleanupExpiredMappings(), 60000);
   }
 
-  createInlineKeyboard(buttons: ExtendedMessageItem[], notificationId: string): TelegramBot.InlineKeyboardMarkup {
+  createInlineKeyboard(buttons: ExtendedMessageItem[], notificationId: string, targetUserId?: number): TelegramBot.InlineKeyboardMarkup {
+    return this.createInlineKeyboardWithSelection(buttons, notificationId, undefined, targetUserId);
+  }
+
+  createInlineKeyboardWithSelection(
+    buttons: ExtendedMessageItem[],
+    notificationId: string,
+    onSelect?: (buttonTitle: string) => void,
+    targetUserId?: number
+  ): TelegramBot.InlineKeyboardMarkup {
     const inlineButtons: TelegramBot.InlineKeyboardButton[][] = buttons.map(button => {
       const callbackId = uuidv4();
       
@@ -52,7 +63,9 @@ export class ButtonHandler {
         arguments: button.command?.arguments,
         notificationId,
         buttonTitle: button.title,
-        createdAt: Date.now()
+        createdAt: Date.now(),
+        onSelect,
+        targetUserId
       };
 
       this.buttonMappings.set(callbackId, mapping);
@@ -87,6 +100,16 @@ export class ButtonHandler {
       return;
     }
 
+    // Verify that the callback is from the target user
+    if (mapping.targetUserId && callbackQuery.from && callbackQuery.from.id !== mapping.targetUserId) {
+      this.logger.warn(`Callback query from unauthorized user: ${callbackQuery.from.id}, expected: ${mapping.targetUserId}`);
+      this.bot.answerCallbackQuery(callbackQuery.id, {
+        text: '⚠️ Only the intended recipient can interact with this message',
+        show_alert: true
+      });
+      return;
+    }
+
     this.logger.info(`Button clicked: ${mapping.buttonTitle} (${callbackId})`);
 
     // Execute the corresponding VS Code command
@@ -95,8 +118,14 @@ export class ButtonHandler {
 
   private async executeCommand(mapping: ButtonMapping, callbackQuery: TelegramBot.CallbackQuery): Promise<void> {
     try {
-      // If there's a command ID, execute it
-      if (mapping.commandId) {
+      if (mapping.onSelect) {
+        mapping.onSelect(mapping.buttonTitle);
+        this.bot.answerCallbackQuery(callbackQuery.id, {
+          text: `✅ ${mapping.buttonTitle}`,
+          show_alert: false
+        });
+      } else if (mapping.commandId) {
+        // If there's a command ID, execute it
         this.logger.info(`Executing VS Code command: ${mapping.commandId}`);
         await vscode.commands.executeCommand(mapping.commandId, ...(mapping.arguments || []));
         
@@ -145,6 +174,9 @@ export class ButtonHandler {
 
     for (const [callbackId, mapping] of this.buttonMappings.entries()) {
       if (now - mapping.createdAt > this.buttonTimeout) {
+        if (mapping.onSelect) {
+          mapping.onSelect('');
+        }
         this.buttonMappings.delete(callbackId);
         cleanedCount++;
       }
