@@ -7,13 +7,16 @@ This directory contains skill files that help AI assistants (like Qoder) underst
 ### 1. project-knowledge.skill.md
 **Purpose:** Complete project overview and technical details  
 **Contains:**
-- Architecture overview (13 source files)
-- Configuration schema (13 settings)
-- All 28 commands
+- Architecture overview (14 source files)
+- Configuration schema (14 settings)
+- All 35 commands
 - Development workflows
-- Key patterns and data flows
+- Key patterns and data flows (9 workflows)
 - File structure map
 - Common tasks guide
+- VS Code API patching details
+- BotMutex multi-instance coordination
+- Qoder transcript parsing
 
 **Use when:** 
 - Starting work on the project
@@ -62,13 +65,13 @@ This directory contains skill files that help AI assistants (like Qoder) underst
 ### 4. architecture-patterns.skill.md
 **Purpose:** Understand design decisions and architectural patterns  
 **Contains:**
-- 5 key architectural decisions
-- 5 design patterns used
-- Data flow diagrams
-- Performance optimizations
-- Security design
+- 7 key architectural decisions (including VS Code API patching, BotMutex)
+- 7 design patterns used (including Promise.race, State Machine)
+- 7 data flow diagrams (including intercepted notifications, prompts, transcripts)
+- Performance optimizations (6 techniques)
+- Security design (5 mechanisms)
 - Code organization principles
-- Future improvements
+- Future improvements (7 ideas)
 
 **Use when:**
 - Making architectural changes
@@ -171,9 +174,9 @@ When making significant changes:
 ## 📊 Statistics
 
 - **Total skill files:** 4
-- **Total lines:** ~1,483
-- **Total words:** ~12,500
-- **Coverage:** Architecture, code, debug, patterns, practices
+- **Total lines:** ~1,900
+- **Total words:** ~15,000
+- **Coverage:** Architecture, code, debug, patterns, practices, VS Code API patching, Qoder integration, multi-instance support
 
 ---
 
@@ -206,6 +209,6 @@ When making significant changes:
 ## 📝 History
 
 - **Created:** 2026-05-29
-- **Version:** 0.1.5
-- **Last Updated:** 2026-05-29
-- **Trigger:** User requested comprehensive project analysis for AI efficiency
+- **Version:** 0.1.8
+- **Last Updated:** 2026-05-31
+- **Trigger:** Comprehensive project analysis and skill update for v0.1.8

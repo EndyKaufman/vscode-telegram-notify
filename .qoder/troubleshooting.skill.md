@@ -35,6 +35,7 @@ if (!validation.valid) {
 1. Wrong bot token or chat ID
 2. Network/proxy issues
 3. Bot blocked by user
+4. Bot not initialized (config invalid)
 
 **Diagnostic Steps:**
 ```typescript
@@ -64,6 +65,7 @@ if (proxyConfig.enabled) {
 **Symptoms:**
 - Buttons appear in Telegram but don't respond
 - "This button has expired" message
+- "Unauthorized" message
 
 **Causes & Fixes:**
 
@@ -91,12 +93,17 @@ if (proxyConfig.enabled) {
 }
 ```
 
-3. **Wrong Chat ID**
+3. **Wrong Chat ID / Unauthorized User**
 ```typescript
 // ButtonHandler validates chat ID
 // Ensure callback comes from configured chat
 if (callbackQuery.message.chat.id.toString() !== this.chatId) {
   // Rejected - unauthorized chat
+}
+
+// For private chats, targetUserId validation
+if (mapping.targetUserId && callbackQuery.from.id !== mapping.targetUserId) {
+  // Rejected - unauthorized user
 }
 ```
 
@@ -190,6 +197,92 @@ ls -la .qoder/
 Ctrl+Shift+X → Search "Qoder"
 ```
 
+### Issue 7: "409 Conflict: terminated by other getUpdates request"
+**Symptoms:**
+- Multiple VS Code windows open
+- Only one instance should poll Telegram
+- Error appears in logs
+
+**Solution:**
+This is handled by BotMutex automatically:
+```typescript
+// BotMutex ensures only one instance polls
+// Lock file: /tmp/vscode-telegram-bot.lock
+// Stale lock timeout: 5 minutes
+// Heartbeat: Every 60 seconds
+```
+
+**If issue persists:**
+```bash
+# Delete stale lock file
+rm /tmp/vscode-telegram-bot.lock
+
+# Restart VS Code
+```
+
+### Issue 8: VS Code API patching not working
+**Symptoms:**
+- showInformationMessage called but not forwarded to Telegram
+- showInputBox not showing in Telegram
+- showQuickPick not showing in Telegram
+
+**Causes & Fixes:**
+
+1. **Extension activated before patching**
+```typescript
+// Patching happens in notificationInterceptor.initialize()
+// Called in extension.ts activate()
+// Ensure interceptor is initialized before other extensions call VS Code APIs
+```
+
+2. **VS Code update broke patching**
+```typescript
+// Monkey-patching may break with VS Code updates
+// Check logs: "Cannot patch vscode.window.XXX: method not found"
+// If method signature changed, update patched function
+```
+
+3. **dispose() restored original methods**
+```typescript
+// Original methods restored on deactivate()
+// If extension disabled, patching removed
+// Re-enable extension to re-patch
+```
+
+### Issue 9: showQuickPick shows only 30 items
+**Symptoms:**
+- QuickPick has 50 items
+- Only 30 appear in Telegram
+
+**Cause:**
+Telegram inline keyboard button limit is 30 (practical limit for UX).
+
+**Solution:**
+This is intentional. If you need more items, consider:
+- Filtering items before showing
+- Using showInputBox instead (text reply)
+- Grouping items into categories
+
+### Issue 10: Multiple selection QuickPick not working from Telegram
+**Symptoms:**
+- QuickPick with `canPickMany: true`
+- Telegram message says "Multiple selection cannot be answered"
+
+**Cause:**
+Telegram buttons don't support multiple selection.
+
+**Solution:**
+```typescript
+// Notification interceptor detects canPickMany
+// Shows informational message instead of buttons
+await this.forwardNotification(
+  `${options?.placeHolder || 'Quick pick requested'}\n\nMultiple selection QuickPick cannot be answered from Telegram yet.`,
+  MessageType.Information,
+  'VS Code QuickPick'
+);
+return undefined;  // Falls back to VS Code
+```
+
 ## 🎯 Best Practices
 
 ### 1. Configuration Management
@@ -224,7 +317,9 @@ await telegramBot.sendMessage(msg, severity, source);  // Might crash!
 ```typescript
 // ✅ DO: Dispose resources
 export function deactivate() {
+  if (qoderIntegration) qoderIntegration.dispose();
   if (telegramBot) telegramBot.shutdown();
+  if (notificationInterceptor) notificationInterceptor.dispose();
   if (commandManager) commandManager.dispose();
   if (logger) logger.dispose();
 }
@@ -300,6 +395,37 @@ F5             # Launch Extension Development Host
 // Hard to debug without logs!
 ```
 
+### 9. VS Code API Patching
+```typescript
+// ✅ DO: Store original methods
+this.originalShowInformationMessage = original;
+
+// ✅ DO: Restore on dispose
+if (this.originalShowInformationMessage) {
+  windowApi.showInformationMessage = this.originalShowInformationMessage;
+}
+
+// ✅ DO: Use Promise.race for bidirectional sync
+return Promise.race([originalPromise, telegramPromise]);
+
+// ❌ DON'T: Block original method
+// Always call original and return its result or Telegram result
+```
+
+### 10. BotMutex Management
+```typescript
+// ✅ DO: Check if lock acquired
+this.hasPollingLock = await this.mutex.tryAcquire();
+
+// ✅ DO: Release lock on shutdown
+if (this.hasPollingLock) {
+  this.mutex.release();
+}
+
+// ❌ DON'T: Poll without lock
+// Causes 409 conflicts with other instances
+```
+
 ## 📊 Performance Tips
 
 ### 1. Button Cleanup
@@ -336,11 +462,28 @@ const patterns = [
 // Bad for: Losing important information
 ```
 
+### 4. Transcript Deduplication
+```typescript
+// QoderIntegration tracks seenIds (max 500)
+// Prevents duplicate notifications
+// Automatically trims to last 250 when exceeds 500
+// No action needed, but be aware of memory usage
+```
+
+### 5. Multi-Instance Optimization
+```typescript
+// Only one instance polls (has BotMutex lock)
+// Other instances run in send-only mode (polling=false)
+// Reduces Telegram API load
+// No manual configuration needed
+```
+
 ## 🔐 Security Checklist
 
 - [x] Bot token stored in VS Code secrets (when available)
 - [x] Proxy credentials masked in logs
 - [x] Chat ID validation (reject unauthorized)
+- [x] targetUserId validation for private/group chats
 - [x] No sensitive data in error messages
 - [x] Configuration validation before use
 - [ ] Don't commit secrets to git (use .gitignore)
@@ -363,3 +506,5 @@ const patterns = [
 - VS Code Output Panel: `Ctrl+Shift+U`
 - Extension Logs: Select "Telegram Notify"
 - Developer Tools: `Ctrl+Shift+I` (Extension Host)
+- Mutex Lock File: `/tmp/vscode-telegram-bot.lock`
+- Qoder Transcripts: `~/.qoder/projects/**/*.jsonl`

@@ -16,11 +16,12 @@ Telegram Notify: Setup Bot           # First-time setup
 Telegram Notify: Send Test           # Test connection
 Telegram Notify: Toggle              # Enable/disable
 Telegram Notify: Show Statistics     # View stats
+Telegram Notify: Copy Stats          # Copy stats to clipboard
 ```
 
 ## 📝 Common Code Patterns
 
-### Forward Notification
+### Forward Notification (Direct)
 ```typescript
 import { notificationInterceptor } from './extension';
 import { MessageType } from './types';
@@ -47,6 +48,17 @@ await notificationInterceptor.forwardNotification(
       command: undefined
     }
   ]
+);
+```
+
+### Programmatically from Other Extensions
+```typescript
+// Use the internal command
+await vscode.commands.executeCommand(
+  'telegram-notify.sendNotification',
+  'Message text',
+  MessageType.Information,
+  buttons  // optional ExtendedMessageItem[]
 );
 ```
 
@@ -86,6 +98,41 @@ await telegramBot.sendMessage(
 );
 ```
 
+### Wait for Button Click
+```typescript
+import { telegramBot } from './extension';
+import { MessageType } from './types';
+
+const selectedButton = await telegramBot.sendMessageAndWaitForButton(
+  'Choose an action:',
+  MessageType.Information,
+  'Source',
+  [
+    { title: '✅ Accept' },
+    { title: '❌ Reject' }
+  ]
+);
+
+if (selectedButton === '✅ Accept') {
+  // User accepted
+}
+```
+
+### Wait for Text Reply (Prompt)
+```typescript
+import { telegramBot } from './extension';
+import { MessageType } from './types';
+
+const reply = await telegramBot.sendPromptAndWaitForReply(
+  'Enter your name:',
+  'Source'
+);
+
+if (reply) {
+  console.log('User replied:', reply);
+}
+```
+
 ## 🔧 Adding New Features
 
 ### New Command
@@ -116,10 +163,10 @@ private async handleMyCommand(): Promise<void> {
 ```typescript
 // In testCommands.ts:
 async testMyScenario(): Promise<void> {
-  await this.forwardNotification(
+  await vscode.commands.executeCommand(
+    'telegram-notify.sendNotification',
     'Test message',
-    MessageType.Information,
-    'Test Command'
+    MessageType.Information
   );
 }
 
@@ -149,16 +196,64 @@ export interface TelegramNotifyConfig {
 mySetting: this.config.get<boolean>('mySetting', false),
 ```
 
+### New VS Code API Interceptor
+```typescript
+// In notificationInterceptor.ts:
+
+private patchNewMethod(): void {
+  const windowApi = vscode.window as any;
+  const original = windowApi.newMethod as (...args: any[]) => Thenable<any>;
+
+  if (typeof original !== 'function') {
+    return;
+  }
+
+  // Store original
+  this.originalNewMethod = original;
+
+  const interceptor = this;
+  const patched = function patchedNewMethod(this: unknown, ...args: any[]) {
+    const originalPromise = original.call(this, ...args);
+    
+    // Forward to Telegram
+    interceptor.forwardNotification(
+      String(args[0]),
+      MessageType.Information,
+      'New Method'
+    );
+
+    return originalPromise;
+  };
+
+  // Patch
+  try {
+    windowApi.newMethod = patched;
+  } catch {
+    Object.defineProperty(windowApi, 'newMethod', {
+      configurable: true,
+      writable: true,
+      value: patched,
+    });
+  }
+}
+
+// In dispose():
+if (this.originalNewMethod) {
+  windowApi.newMethod = this.originalNewMethod;
+}
+```
+
 ## 📦 File Structure Quick Reference
 
 ```
 src/
 ├── extension.ts              # Entry point (exports all services)
 ├── configManager.ts          # Settings management
-├── telegramBot.ts            # Telegram API wrapper
+├── telegramBot.ts            # Telegram API wrapper + mutex
+├── botMutex.ts               # Multi-instance polling lock
 ├── buttonHandler.ts          # Button callback handling
 ├── messageFormatter.ts       # Message formatting
-├── notificationInterceptor.ts # Notification routing
+├── notificationInterceptor.ts # VS Code API patching + routing
 ├── proxyManager.ts           # Proxy support
 ├── qoderIntegration.ts       # Qoder sidebar monitoring
 ├── commands.ts               # VS Code commands
@@ -189,6 +284,7 @@ export {
 - [ ] Check proxy if enabled
 - [ ] Review logs for errors
 - [ ] Run test command to verify connection
+- [ ] Check mutex lock: `/tmp/vscode-telegram-bot.lock`
 
 ## 📊 Statistics
 
@@ -201,6 +297,9 @@ const buttons = telegramBot.getButtonHandler()?.getActiveButtonCount() || 0;
 
 // Check connection
 const isConnected = telegramBot.isConnected();
+
+// Check chat ID
+const chatId = telegramBot.getChatId();
 ```
 
 ## 🔄 Lifecycle
@@ -208,20 +307,27 @@ const isConnected = telegramBot.isConnected();
 ### Activation
 ```
 activate()
-  → Initialize services
+  → Initialize services (Logger, ConfigManager, ProxyManager, etc.)
   → Register commands
   → Validate config
   → Initialize bot (if configured)
+    → BotMutex.tryAcquire()
+    → If lock acquired → Enable polling
+    → If lock exists → Send-only mode
+  → Patch VS Code APIs (showMessage, showInputBox, showQuickPick)
+  → Setup file watchers (Qoder)
   → Show welcome message (first time)
 ```
 
 ### Deactivation
 ```
 deactivate()
-  → Dispose Qoder integration
+  → Dispose Qoder integration (file watchers)
   → Dispose test commands
   → Shutdown Telegram bot
-  → Dispose interceptor
+    → BotMutex.release()
+    → Stop polling (if has lock)
+  → Dispose interceptor (restore VS Code APIs)
   → Dispose command manager
   → Dispose logger
 ```
@@ -236,3 +342,39 @@ deactivate()
 6. **Dispose resources** to prevent memory leaks
 7. **Validate config** before using bot
 8. **Use notificationInterceptor** for consistent formatting
+9. **Promise.race** enables bidirectional sync (VS Code ↔ Telegram)
+10. **BotMutex** prevents 409 conflicts with multiple VS Code instances
+11. **Monkey-patching** VS Code APIs may break with updates - test thoroughly
+12. **targetUserId** ensures only intended user can respond (private chats)
+
+## 🎯 Qoder Deeplinks
+
+```typescript
+// Open Qoder chat
+await vscode.commands.executeCommand(
+  'telegram-notify.qoder.openChat',
+  'Your prompt text',
+  'agent'  // or 'ask'
+);
+
+// Open Qoder quest
+await vscode.commands.executeCommand(
+  'telegram-notify.qoder.openQuest',
+  'Your task text',
+  'LocalAgent'  // or 'LocalWorktree', 'RemoteAgent'
+);
+
+// Copy to clipboard
+await vscode.commands.executeCommand(
+  'telegram-notify.qoder.copyToClipboard',
+  'Text to copy'
+);
+```
+
+## 🔐 Security Notes
+
+- Bot token stored in VS Code secrets (with fallback to settings)
+- Proxy credentials masked in logs
+- Chat ID validation rejects unauthorized callbacks
+- targetUserId validation for private/group chat authorization
+- Never log raw credentials
